@@ -46,9 +46,11 @@ async fn main() {
 
 #[command]
 async fn eval(ctx: &Context, msg: &Message) -> CommandResult {
-  println!("=> processing eval request from {}", msg.author.name);
+  println!("[?] processing eval request from {}", msg.author.name);
 
   if msg.author.id.to_string() != env::var("DISCORD_OWNER_ID").expect("owner id") {
+    println!("  [-] unauthorized request");
+
     msg
       .reply(ctx, "You don't have permission to do that.")
       .await?;
@@ -60,7 +62,19 @@ async fn eval(ctx: &Context, msg: &Message) -> CommandResult {
     return Ok(());
   }
 
-  println!("=> command authorized; evaluating request");
+  println!("  [+] request authorized; evaluating command");
+
+  if !msg.content.starts_with(".eval\n```rs\n") || !msg.content.ends_with("\n```") {
+    msg
+      .reply(ctx, "The message content is not a valid code snippet. Ensure that the code block has the `rs` syntax format.")
+      .await?;
+
+    return Ok(());
+  }
+
+  let code_sample = msg.content.split("```rs\n").collect::<Vec<_>>()[1]
+    .split("\n```")
+    .collect::<Vec<_>>()[0];
 
   msg
     .react(
@@ -74,7 +88,7 @@ async fn eval(ctx: &Context, msg: &Message) -> CommandResult {
     .await?;
 
   let command = Command::new("./eval.sh")
-    .arg(msg.content.split(".eval").collect::<Vec<_>>()[1])
+    .arg(code_sample)
     .stdout(std::process::Stdio::piped())
     .stderr(std::process::Stdio::piped())
     .spawn();
@@ -92,8 +106,6 @@ async fn eval(ctx: &Context, msg: &Message) -> CommandResult {
     .wait_with_output()
     .expect("failed to spawn eval script");
 
-  let mut final_output_stream = &output.stdout;
-
   if output.status.success() {
     msg
       .react(ctx, ReactionType::Unicode("✅".to_string()))
@@ -102,17 +114,12 @@ async fn eval(ctx: &Context, msg: &Message) -> CommandResult {
     msg
       .react(ctx, ReactionType::Unicode("❌".to_string()))
       .await?;
-
-    final_output_stream = &output.stderr;
   }
 
   msg
     .reply(
       ctx,
-      format!(
-        "```llvm\n{}\n```",
-        String::from_utf8_lossy(final_output_stream)
-      ),
+      format!("```llvm\n{}\n```", String::from_utf8_lossy(&output.stdout)),
     )
     .await?;
 
